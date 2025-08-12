@@ -14,7 +14,7 @@ const SocketHandler = require('./utils/socketHandler');
 
 const app = express();
 const server = http.createServer(app);
-console.log("add");
+
 
 // Socket.IO configuration
 const io = socketIo(server, {
