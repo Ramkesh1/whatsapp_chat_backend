@@ -94,6 +94,9 @@ socket.join(`chat_${chat.id}`);
         socket.on('typing_start', (data) => this.handleTypingStart(socket, data));
         socket.on('typing_stop', (data) => this.handleTypingStop(socket, data));
 
+    
+
+
         // Message status events
         socket.on('message_delivered', (data) => this.handleMessageStatus(socket, data, 'delivered'));
         socket.on('message_read', (data) => this.handleMessageStatus(socket, data, 'read'));
@@ -220,6 +223,9 @@ socket.join(`chat_${chat.id}`);
         socket.join(`chat_${chatId}`);
     }
 
+
+    
+
     // Handle leave chat
     handleLeaveChat(socket, data) {
         const { chatId } = data;
@@ -261,28 +267,36 @@ socket.join(`chat_${chat.id}`);
     }
 
     // Broadcast user status to relevant chats
-    async broadcastUserStatus(userId, isOnline) {
-        try {
-            // Get all chats where this user is a participant
-            const [chats] = await executeQuery(
-                `SELECT DISTINCT c.id FROM chats c 
-                 JOIN chat_participants cp ON c.id = cp.chat_id 
-                 WHERE cp.user_id = ? AND cp.is_active = TRUE`,
-                [userId]
-            );
+  // Broadcast user status to relevant chats
+async broadcastUserStatus(userId, isOnline) {
+    try {
+        // Get all chats where this user is a participant
+        const chats = await executeQuery(
+            `SELECT DISTINCT c.id FROM chats c 
+             JOIN chat_participants cp ON c.id = cp.chat_id 
+             WHERE cp.user_id = ? AND cp.is_active = TRUE`,
+            [userId]
+        );
 
-           const chatArray = Array.isArray(chats) ? chats : [chats];
+        const chatArray = Array.isArray(chats) ? chats : [chats];
 
-for (const chat of chatArray) {
-    this.io.to(`chat_${chat.id}`).emit(
-        isOnline ? 'user_connected' : 'user_disconnected',
-        { userId, isOnline }
-    );
-}
-        } catch (error) {
-            console.error('Broadcast user status error:', error);
+        for (const chat of chatArray) {
+            const roomName = `chat_${chat.id}`;
+
+            // Sirf un sockets ko emit karo jo room me hain (matlab tab open hai)
+            const room = this.io.sockets.adapter.rooms.get(roomName);
+            if (room && room.size > 1) { // >= 2 ka matlab dono joined
+                this.io.to(roomName).emit(
+                    isOnline ? 'user_connected' : 'user_disconnected',
+                    { userId, isOnline }
+                );
+            }
         }
+    } catch (error) {
+        console.error('Broadcast user status error:', error);
     }
+}
+
 
     // Update message status for online users
     async updateMessageStatusForOnlineUsers(chatId, messageId) {
