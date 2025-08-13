@@ -71,12 +71,9 @@ app.use((error, req, res, next) => {
 //     });
 // });
 
-const PORT = process.env.PORT || 5000;
+const PORT = process.env.PORT || 7007;
 
 server.listen(PORT, () => {
-    console.log(`🚀 Server running on port ${PORT}`);
-    console.log(`📱 Socket.IO server ready`);
-    console.log(`☁️  S3 file storage configured`);
     console.log(`🌍 Environment: ${process.env.NODE_ENV || 'development'}`);
 });
 

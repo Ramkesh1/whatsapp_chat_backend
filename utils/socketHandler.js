@@ -31,7 +31,7 @@ class SocketHandler {
                 throw new Error('User not found');
             }
 
-            socket.user = users[0];
+            socket.user = users;
             next();
         } catch (error) {
             next(new Error('Authentication error'));
@@ -73,9 +73,11 @@ class SocketHandler {
                 [userId]
             );
 
-            for (const chat of chats) {
-                socket.join(`chat_${chat.id}`);
-            }
+            const chatArray = Array.isArray(chats) ? chats : [chats];
+
+for (const chat of chatArray) {
+socket.join(`chat_${chat.id}`);
+}
         } catch (error) {
             console.error('Error joining rooms:', error);
         }
@@ -269,13 +271,14 @@ class SocketHandler {
                 [userId]
             );
 
-            // Broadcast to all relevant chat rooms
-            for (const chat of chats) {
-                this.io.to(`chat_${chat.id}`).emit(isOnline ? 'user_connected' : 'user_disconnected', {
-                    userId,
-                    isOnline
-                });
-            }
+           const chatArray = Array.isArray(chats) ? chats : [chats];
+
+for (const chat of chatArray) {
+    this.io.to(`chat_${chat.id}`).emit(
+        isOnline ? 'user_connected' : 'user_disconnected',
+        { userId, isOnline }
+    );
+}
         } catch (error) {
             console.error('Broadcast user status error:', error);
         }

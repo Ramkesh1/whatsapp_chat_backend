@@ -93,7 +93,7 @@ class ChatController {
             `;
 
             const chats = await executeQuery(query, [userId, userId, userId, userId]);
-            console.log('chats: ', chats);
+           
           
 
             res.json({
