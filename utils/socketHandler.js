@@ -17,7 +17,7 @@ class SocketHandler {
     }
 
     // Socket authentication middleware
-    async authenticateSocket(socket, next) {
+    authenticateSocket(socket, next) {
         const token = socket.handshake.auth.token;
         if (!token) {
             return next(new Error('No token provided'));
@@ -30,19 +30,17 @@ class SocketHandler {
             return next(new Error('Invalid or expired token'));
         }
 
-        let users;
-        try {
-            [users] = await executeQuery('SELECT * FROM users WHERE id = ?', [decoded.id]);
-        } catch (dbErr) {
-            return next(new Error('Database error'));
-        }
-
-        if (!users || users.length === 0) {
-            return next(new Error('User not found'));
-        }
-
-        socket.user = users[0];
-        return next();
+        executeQuery('SELECT * FROM users WHERE id = ?', [decoded.id])
+            .then(([users]) => {
+                if (!users || users.length === 0) {
+                    return next(new Error('User not found'));
+                }
+                socket.user = users[0];
+                return next();
+            })
+            .catch((dbErr) => {
+                return next(new Error('Database error'));
+            });
     }
 
     // Handle new connection
