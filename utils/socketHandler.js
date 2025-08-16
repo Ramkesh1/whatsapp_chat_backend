@@ -18,25 +18,31 @@ class SocketHandler {
 
     // Socket authentication middleware
     async authenticateSocket(socket, next) {
-        try {
-            const token = socket.handshake.auth.token;
-            if (!token) {
-                throw new Error('No token provided');
-            }
-
-            const decoded = jwt.verify(token, process.env.JWT_SECRET || 'your-secret-key');
-            const [users] = await executeQuery('SELECT * FROM users WHERE id = ?', [decoded.id]);
-            
-            if (users.length === 0) {
-                throw new Error('User not found');
-            }
-
-            // FIXED: Store first user from array as object
-            socket.user = users[0];
-            next();
-        } catch (error) {
-            next(new Error('Authentication error'));
+        const token = socket.handshake.auth.token;
+        if (!token) {
+            return next(new Error('No token provided'));
         }
+
+        let decoded;
+        try {
+            decoded = jwt.verify(token, process.env.JWT_SECRET || 'your-secret-key');
+        } catch (err) {
+            return next(new Error('Invalid or expired token'));
+        }
+
+        let users;
+        try {
+            [users] = await executeQuery('SELECT * FROM users WHERE id = ?', [decoded.id]);
+        } catch (dbErr) {
+            return next(new Error('Database error'));
+        }
+
+        if (!users || users.length === 0) {
+            return next(new Error('User not found'));
+        }
+
+        socket.user = users[0];
+        return next();
     }
 
     // Handle new connection
