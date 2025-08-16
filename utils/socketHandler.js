@@ -31,7 +31,7 @@ class SocketHandler {
                 throw new Error('User not found');
             }
 
-            socket.user = users[0]; // FIX: assign single user object
+            socket.user = users;
             next();
         } catch (error) {
             next(new Error('Authentication error'));
@@ -72,10 +72,12 @@ class SocketHandler {
                  WHERE cp.user_id = ? AND cp.is_active = TRUE`,
                 [userId]
             );
-            // Always join all rooms
-            for (const chat of chats) {
-                socket.join(`chat_${chat.id}`);
-            }
+
+            const chatArray = Array.isArray(chats) ? chats : [chats];
+
+for (const chat of chatArray) {
+socket.join(`chat_${chat.id}`);
+}
         } catch (error) {
             console.error('Error joining rooms:', error);
         }
@@ -123,8 +125,8 @@ class SocketHandler {
                 return;
             }
 
-            // Broadcast message to all participants in the chat room (including sender)
-            this.io.to(`chat_${chatId}`).emit('new_message', {
+            // Broadcast message to all participants in the chat room
+            socket.to(`chat_${chatId}`).emit('new_message', {
                 ...message,
                 chatId
             });
@@ -219,8 +221,6 @@ class SocketHandler {
     handleJoinChat(socket, data) {
         const { chatId } = data;
         socket.join(`chat_${chatId}`);
-        // Optionally, emit an event to confirm join
-        // socket.emit('joined_chat', { chatId });
     }
 
 
