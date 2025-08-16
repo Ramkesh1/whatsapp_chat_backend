@@ -1,7 +1,7 @@
 const express = require('express');
 const cors = require('cors');
-const http = require("http");
-const { Server } = require("socket.io");
+const http = require('http');
+const socketIo = require('socket.io');
 require('dotenv').config();
 
 // Import routes
@@ -25,12 +25,15 @@ app.use(cors({
 }));
 
 // Socket.IO configuration
-const io = new Server(server, {
+const io = require('socket.io')(server, {
   cors: {
-    origin: "*",  // frontend ka IP:PORT
+    origin: "*",
     methods: ["GET", "POST"],
-    credentials: true
-  }
+    credentials: true,
+    allowedHeaders: ["*"]
+  },
+  transports: ['websocket', 'polling'],
+  allowEIO3: true
 });
 
 
