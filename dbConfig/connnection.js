@@ -1,25 +1,44 @@
-const mysql = require('mysql2/promise');
+const mysql = require('mysql2');
 
-// Create a connection pool (recommended for chat apps / APIs)
-const pool = mysql.createPool({
-  user: process.env.DB_USER,
-  host: process.env.DB_HOST,
-  password: process.env.DB_PASSWORD,
-  database: process.env.DB_DATABASE,
-  port: 3306,
-  waitForConnections: true,
-  connectionLimit: 10,   // max open connections
-  queueLimit: 0
-});
-
-// Function to execute a query
-async function executeQuery(query, params) {
-  try {
-    const [rows] = await pool.query(query, params);
-    return rows;
-  } catch (err) {
-    throw err;
-  }
+// Function to create a new MySQL connection
+function createConnection() {
+  return mysql.createConnection({
+    user: process.env.DB_USER, 
+    host: process.env.DB_HOST,
+    password: process.env.DB_PASSWORD,
+    database: process.env.DB_DATABASE,
+    port: 3306,
+    multipleStatements: true
+  });
 }
 
-module.exports = { executeQuery };
+
+// Function to execute a query against the MySQL database
+async function executeQuery(query, params) {
+  let connection = createConnection();
+
+  return new Promise((resolve, reject) => {
+    connection.connect((err) => {
+      if (err) {
+        connection.end(); 
+        return reject(err); 
+      }
+
+      // Execute the query
+      connection.query(query, params, (err, results) => {
+        connection.end(); 
+
+        if (err) {
+          return reject(err); 
+        }
+
+        resolve(results); 
+      });
+    });
+  });
+}
+
+
+module.exports = {
+  executeQuery,
+};

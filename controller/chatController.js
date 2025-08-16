@@ -1,5 +1,5 @@
 const {executeQuery }= require('../dbConfig/connnection');
-const { upload,uploadBinaryToS3, BUCKET_NAME } = require('../utils/s3bucket');
+const { upload, getFileType, BUCKET_NAME } = require('../utils/s3bucket');
 
 class ChatController {
     // Get user's chat list with last message and unread count
@@ -304,15 +304,6 @@ class ChatController {
     static async uploadFile(req, res) {
         try {
             const userId = req.user.id;
-
-                const buffer = req.body.data
-
-                const fileName=req.body.fileName
-                const fileType=req.body.fileType
-              
-               
-    const url = await uploadBinaryToS3(buffer, fileName, "whatsappchat", fileType);
-
             const { chatId } = req.body;
 
             if (!chatId) {
@@ -336,7 +327,7 @@ class ChatController {
             }
 
             // File is already uploaded to S3 by multer-s3
-            const file =url
+            const file = req.file;
             if (!file) {
                 return res.status(400).json({
                     success: false,
@@ -344,11 +335,11 @@ class ChatController {
                 });
             }
 
-         
-            const fileUrl = url; // S3 URL
+            const fileType = getFileType(file.mimetype);
+            const fileUrl = file.location; // S3 URL
             
             // Insert message
-            const result= await executeQuery(
+            const [result] = await executeQuery(
                 `INSERT INTO messages (chat_id, sender_id, message_type, content, file_url, file_name, file_size) 
                  VALUES (?, ?, ?, ?, ?, ?, ?)`,
                 [chatId, userId, fileType, req.body.caption || '', fileUrl, file.originalname, file.size]
@@ -357,7 +348,7 @@ class ChatController {
             const messageId = result.insertId;
 
             // Get all participants for status tracking
-            const allParticipants = await executeQuery(
+            const [allParticipants] = await executeQuery(
                 'SELECT user_id FROM chat_participants WHERE chat_id = ? AND is_active = TRUE',
                 [chatId]
             );
@@ -373,7 +364,7 @@ class ChatController {
             }
 
             // Get complete message data
-            const messageData = await executeQuery(
+            const [messageData] = await executeQuery(
                 `SELECT m.*, u.name as sender_name, u.avatar as sender_avatar
                  FROM messages m 
                  JOIN users u ON m.sender_id = u.id 

@@ -55,13 +55,13 @@ app.get('/api/health', (req, res) => {
 const socketHandler = new SocketHandler(io);
 
 // Global error handler
-// app.use((error, req, res, next) => {
-//     console.error('Global error handler:', error);
-//     res.status(500).json({
-//         success: false,
-//         message: 'Internal server error'
-//     });
-// });
+app.use((error, req, res, next) => {
+    console.error('Global error handler:', error);
+    res.status(500).json({
+        success: false,
+        message: 'Internal server error'
+    });
+});
 
 // 404 handler
 // app.use('*', (req, res) => {

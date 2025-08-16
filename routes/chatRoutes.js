@@ -23,7 +23,7 @@ router.post('/message', ChatController.sendMessage);
 
 
 // Upload file and send message
-router.post('/upload', ChatController.uploadFile);
+router.post('/upload', uploadMulter.single('file'), ChatController.uploadFile);
 
 // Create new chat
 router.post('/create', ChatController.createChat);
