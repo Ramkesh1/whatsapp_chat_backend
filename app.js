@@ -1,7 +1,7 @@
 const express = require('express');
 const cors = require('cors');
-const http = require('http');
-const socketIo = require('socket.io');
+const http = require("http");
+const { Server } = require("socket.io");
 require('dotenv').config();
 
 // Import routes
@@ -25,16 +25,15 @@ app.use(cors({
 }));
 
 // Socket.IO configuration
-const io = require('socket.io')(server, {
+const io = new Server(server, {
   cors: {
-    origin: "*",
+    origin: "*",  // frontend ka IP:PORT
     methods: ["GET", "POST"],
-    credentials: true,
-    allowedHeaders: ["*"]
-  },
-  transports: ['websocket', 'polling'],
-  allowEIO3: true
+    credentials: true
+  }
 });
+
+
 
 app.use(express.json({ limit: '50mb' }));
 app.use(express.urlencoded({ extended: true, limit: '50mb' }));
