@@ -23,7 +23,7 @@ router.get('/profile', userController.getProfile);
 router.put('/profile', userController.updateProfile);
 
 // Upload and update profile picture
-router.post('/avatar', uploadMulter.single('avatar'), userController.updateAvatar);
+router.post('/avatar', userController.updateAvatar);
 
 // Search users
 router.get('/search', userController.searchUsers);
