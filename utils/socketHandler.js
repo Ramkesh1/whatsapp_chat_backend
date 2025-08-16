@@ -31,7 +31,7 @@ class SocketHandler {
                 throw new Error('User not found');
             }
 
-            socket.user = users[0]; // FIXED: users[0] instead of users
+            socket.user = users;
             next();
         } catch (error) {
             next(new Error('Authentication error'));
@@ -53,10 +53,8 @@ class SocketHandler {
         // Join user to their chat rooms
         await this.joinUserRooms(socket, userId);
 
-        // Notify other users about online status - with delay
-        setTimeout(() => {
-            this.broadcastUserStatus(userId, true);
-        }, 500);
+        // Notify other users about online status
+        this.broadcastUserStatus(userId, true);
 
         // Handle socket events
         this.handleSocketEvents(socket);
@@ -75,15 +73,11 @@ class SocketHandler {
                 [userId]
             );
 
-            // FIXED: Check if chats exist
-            if (!chats || chats.length === 0) return;
-
             const chatArray = Array.isArray(chats) ? chats : [chats];
 
-            for (const chat of chatArray) {
-                socket.join(`chat_${chat.id}`);
-                console.log(`User ${userId} joined chat_${chat.id}`);
-            }
+for (const chat of chatArray) {
+socket.join(`chat_${chat.id}`);
+}
         } catch (error) {
             console.error('Error joining rooms:', error);
         }
@@ -100,6 +94,9 @@ class SocketHandler {
         socket.on('typing_start', (data) => this.handleTypingStart(socket, data));
         socket.on('typing_stop', (data) => this.handleTypingStop(socket, data));
 
+    
+
+
         // Message status events
         socket.on('message_delivered', (data) => this.handleMessageStatus(socket, data, 'delivered'));
         socket.on('message_read', (data) => this.handleMessageStatus(socket, data, 'read'));
@@ -109,9 +106,6 @@ class SocketHandler {
 
         // Leave chat room
         socket.on('leave_chat', (data) => this.handleLeaveChat(socket, data));
-        
-        // ADDED: Handle open chat event
-        socket.on('open_chat', (data) => this.handleOpenChat(socket, data));
     }
 
     // Handle send message
@@ -134,20 +128,11 @@ class SocketHandler {
             // Broadcast message to all participants in the chat room
             socket.to(`chat_${chatId}`).emit('new_message', {
                 ...message,
-                chatId,
-                senderName: socket.user.name
-            });
-
-            // Also emit to sender for confirmation
-            socket.emit('message_sent', {
-                ...message,
                 chatId
             });
 
             // Update message status for online users
-            if (message.id) {
-                await this.updateMessageStatusForOnlineUsers(chatId, message.id);
-            }
+            await this.updateMessageStatusForOnlineUsers(chatId, message.id);
 
         } catch (error) {
             console.error('Send message error:', error);
@@ -222,8 +207,7 @@ class SocketHandler {
                     this.io.to(senderSocketId).emit('message_status_update', {
                         messageId,
                         status,
-                        userId,
-                        chatId
+                        userId
                     });
                 }
             }
@@ -233,55 +217,19 @@ class SocketHandler {
         }
     }
 
-    // FIXED: Handle join chat
+    // Handle join chat
     handleJoinChat(socket, data) {
         const { chatId } = data;
         socket.join(`chat_${chatId}`);
-        
-        socket.to(`chat_${chatId}`).emit('user_joined_chat', {
-            userId: socket.user.id,
-            chatId,
-            userName: socket.user.name,
-            isOnline: true
-        });
     }
 
-    // FIXED: Handle leave chat
+
+    
+
+    // Handle leave chat
     handleLeaveChat(socket, data) {
         const { chatId } = data;
         socket.leave(`chat_${chatId}`);
-        
-        socket.to(`chat_${chatId}`).emit('user_left_chat', {
-            userId: socket.user.id,
-            chatId,
-            userName: socket.user.name
-        });
-    }
-
-    // ADDED: Handle open chat
-    async handleOpenChat(socket, data) {
-        try {
-            const { chatId } = data;
-            const userId = socket.user.id;
-            
-            socket.join(`chat_${chatId}`);
-            
-            socket.to(`chat_${chatId}`).emit('user_joined_chat', {
-                userId,
-                chatId,
-                userName: socket.user.name,
-                isOnline: true
-            });
-
-            const onlineUsers = await this.getOnlineUsersInChat(chatId);
-            socket.emit('chat_online_users', {
-                chatId,
-                onlineUsers: onlineUsers.filter(id => id !== userId)
-            });
-            
-        } catch (error) {
-            console.error('Open chat error:', error);
-        }
     }
 
     // Handle disconnect
@@ -318,40 +266,37 @@ class SocketHandler {
         }
     }
 
-    // FIXED: Broadcast user status to relevant chats
-    async broadcastUserStatus(userId, isOnline) {
-        try {
-            const [chats] = await executeQuery(
-                `SELECT DISTINCT c.id FROM chats c 
-                 JOIN chat_participants cp ON c.id = cp.chat_id 
-                 WHERE cp.user_id = ? AND cp.is_active = TRUE`,
-                [userId]
-            );
+    // Broadcast user status to relevant chats
+  // Broadcast user status to relevant chats
+async broadcastUserStatus(userId, isOnline) {
+    try {
+        // Get all chats where this user is a participant
+        const chats = await executeQuery(
+            `SELECT DISTINCT c.id FROM chats c 
+             JOIN chat_participants cp ON c.id = cp.chat_id 
+             WHERE cp.user_id = ? AND cp.is_active = TRUE`,
+            [userId]
+        );
 
-            if (chats && chats.length > 0) {
-                const chatArray = Array.isArray(chats) ? chats : [chats];
+        const chatArray = Array.isArray(chats) ? chats : [chats];
 
-                const [userInfo] = await executeQuery(
-                    'SELECT name, profile_picture FROM users WHERE id = ?',
-                    [userId]
+        for (const chat of chatArray) {
+            const roomName = `chat_${chat.id}`;
+
+            // Sirf un sockets ko emit karo jo room me hain (matlab tab open hai)
+            const room = this.io.sockets.adapter.rooms.get(roomName);
+            if (room && room.size > 1) { // >= 2 ka matlab dono joined
+                this.io.to(roomName).emit(
+                    isOnline ? 'user_connected' : 'user_disconnected',
+                    { userId, isOnline }
                 );
-
-                for (const chat of chatArray) {
-                    const roomName = `chat_${chat.id}`;
-                    
-                    this.io.to(roomName).emit(isOnline ? 'user_connected' : 'user_disconnected', {
-                        userId,
-                        isOnline,
-                        chatId: chat.id,
-                        userName: userInfo[0]?.name || 'Unknown',
-                        profilePicture: userInfo[0]?.profile_picture || null
-                    });
-                }
             }
-        } catch (error) {
-            console.error('Broadcast user status error:', error);
         }
+    } catch (error) {
+        console.error('Broadcast user status error:', error);
     }
+}
+
 
     // Update message status for online users
     async updateMessageStatusForOnlineUsers(chatId, messageId) {
@@ -362,17 +307,15 @@ class SocketHandler {
                 [chatId]
             );
 
-            if (participants && participants.length > 0) {
-                // Update status to delivered for online users
-                for (const participant of participants) {
-                    if (this.connectedUsers.has(participant.user_id)) {
-                        await executeQuery(
-                            `INSERT INTO message_status (message_id, user_id, status) 
-                             VALUES (?, ?, 'delivered') 
-                             ON DUPLICATE KEY UPDATE status = 'delivered', status_time = NOW()`,
-                            [messageId, participant.user_id]
-                        );
-                    }
+            // Update status to delivered for online users
+            for (const participant of participants) {
+                if (this.connectedUsers.has(participant.user_id)) {
+                    await executeQuery(
+                        `INSERT INTO message_status (message_id, user_id, status) 
+                         VALUES (?, ?, 'delivered') 
+                         ON DUPLICATE KEY UPDATE status = 'delivered', status_time = NOW()`,
+                        [messageId, participant.user_id]
+                    );
                 }
             }
         } catch (error) {
@@ -405,29 +348,19 @@ class SocketHandler {
         return this.connectedUsers.size;
     }
 
-    // FIXED: Get online users in a chat
+    // Get online users in a chat
     async getOnlineUsersInChat(chatId) {
         try {
             const [participants] = await executeQuery(
-                `SELECT cp.user_id, u.name, u.profile_picture 
-                 FROM chat_participants cp 
-                 JOIN users u ON cp.user_id = u.id 
-                 WHERE cp.chat_id = ? AND cp.is_active = TRUE`,
+                'SELECT user_id FROM chat_participants WHERE chat_id = ? AND is_active = TRUE',
                 [chatId]
             );
 
-            if (participants && participants.length > 0) {
-                const onlineUsersData = participants
-                    .filter(p => this.connectedUsers.has(p.user_id))
-                    .map(p => ({
-                        userId: p.user_id,
-                        name: p.name,
-                        profilePicture: p.profile_picture
-                    }));
+            const onlineUsers = participants.filter(p => 
+                this.connectedUsers.has(p.user_id)
+            ).map(p => p.user_id);
 
-                return onlineUsersData;
-            }
-            return [];
+            return onlineUsers;
         } catch (error) {
             console.error('Get online users error:', error);
             return [];
@@ -435,4 +368,3 @@ class SocketHandler {
     }
 }
 
-module.exports = SocketHandler;
