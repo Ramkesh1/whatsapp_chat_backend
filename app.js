@@ -1,7 +1,7 @@
 const express = require('express');
 const cors = require('cors');
 const http = require('http');
-const socketIo = require('socket.io');
+
 require('dotenv').config();
 
 // Import routes
@@ -17,19 +17,24 @@ const server = http.createServer(app);
 
 
 // Socket.IO configuration
-const io = socketIo(server, {
-    cors: {
-        origin: "*",
-        methods: ["GET", "POST"],
-        credentials: true
-    }
-});
-
-// Middleware
 app.use(cors({
-    origin: process.env.CLIENT_URL || "http://localhost:5174",
-    credentials: true
+    origin: "*", // Allow all origins for now
+    methods: ["GET", "POST", "PUT", "DELETE"],
+    credentials: true,
+    allowedHeaders: ["Content-Type", "Authorization"]
 }));
+
+// Socket.IO configuration
+const io = require('socket.io')(server, {
+  cors: {
+    origin: "*",
+    methods: ["GET", "POST"],
+    credentials: true,
+    allowedHeaders: ["*"]
+  },
+  transports: ['websocket', 'polling'],
+  allowEIO3: true
+});
 
 app.use(express.json({ limit: '50mb' }));
 app.use(express.urlencoded({ extended: true, limit: '50mb' }));
