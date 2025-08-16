@@ -37,11 +37,9 @@ class SocketHandler {
             next(new Error('Authentication error'));
         }
     }
-
- async handleConnection(socket) {
-    const userId = socket.user[0].id; // Fix: socket.user is array
-    const userName = socket.user[0].name;
-    console.log(`User ${userName} connected with socket ${socket.id}`);
+async handleConnection(socket) {
+    const userId = socket.user.id; // YE LINE CHANGE - ARRAY NAHI HAI, OBJECT HAI
+    console.log(`User ${socket.user.name} connected with socket ${socket.id}`);
 
     // Store user connection
     this.connectedUsers.set(userId, socket.id);
@@ -53,10 +51,8 @@ class SocketHandler {
     // Join user to their chat rooms
     await this.joinUserRooms(socket, userId);
 
-    // Notify other users about online status - AFTER joining rooms
-    setTimeout(() => {
-        this.broadcastUserStatus(userId, true);
-    }, 500);
+    // Notify other users about online status
+    this.broadcastUserStatus(userId, true);
 
     // Handle socket events
     this.handleSocketEvents(socket);
@@ -92,14 +88,46 @@ socket.join(`chat_${chat.id}`);
     // ... existing handlers ...
 
     // NEW: Handle get online users request
-    socket.on('get_online_users', async (data) => {
+  socket.on('get_online_users', async (data) => {
+    try {
         const { chatId } = data;
-        const onlineUsers = await this.getOnlineUsersForChat(chatId);
+        
+        // Get all participants in chat
+        const [participants] = await executeQuery(
+            'SELECT user_id FROM chat_participants WHERE chat_id = ? AND is_active = TRUE',
+            [chatId]
+        );
+
+        if (!participants || participants.length === 0) {
+            socket.emit('online_users_list', {
+                chatId: chatId,
+                onlineUsers: []
+            });
+            return;
+        }
+
+        const participantArray = Array.isArray(participants) ? participants : [participants];
+        
+        // Filter online users
+        const onlineUserIds = participantArray
+            .filter(p => this.connectedUsers.has(p.user_id))
+            .map(p => p.user_id);
+
         socket.emit('online_users_list', {
             chatId: chatId,
-            onlineUsers: onlineUsers
+            onlineUsers: onlineUserIds
         });
-    });
+        
+        console.log(`Online users for chat ${chatId}:`, onlineUserIds);
+        
+    } catch (error) {
+        console.error('Get online users error:', error);
+        socket.emit('online_users_list', {
+            chatId: data.chatId,
+            onlineUsers: []
+        });
+    }
+});
 
     // ... rest of existing handlers ...
 }
@@ -275,24 +303,22 @@ async broadcastUserStatus(userId, isOnline) {
 
         if (!chats || chats.length === 0) return;
 
-        // Handle both array and single object cases
         const chatArray = Array.isArray(chats) ? chats : [chats];
 
         for (const chat of chatArray) {
             const roomName = `chat_${chat.id}`;
             
-            // Get all sockets in this room
-            const room = this.io.sockets.adapter.rooms.get(roomName);
-            if (room && room.size >= 1) {
-                // Broadcast to all users in room
-                this.io.to(roomName).emit(isOnline ? 'user_connected' : 'user_disconnected', {
-                    userId: userId,
+            // Broadcast to all users in the room
+            this.io.to(roomName).emit(
+                isOnline ? 'user_connected' : 'user_disconnected',
+                { 
+                    userId: userId, 
                     isOnline: isOnline,
-                    chatId: chat.id
-                });
-                
-                console.log(`Broadcasting ${isOnline ? 'connected' : 'disconnected'} for user ${userId} to chat ${chat.id}`);
-            }
+                    chatId: chat.id 
+                }
+            );
+            
+            console.log(`Broadcasting ${isOnline ? 'connected' : 'disconnected'} for user ${userId} to chat ${chat.id}`);
         }
     } catch (error) {
         console.error('Broadcast user status error:', error);
