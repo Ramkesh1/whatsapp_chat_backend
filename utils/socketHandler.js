@@ -17,40 +17,30 @@ class SocketHandler {
     }
 
     // Socket authentication middleware
-    authenticateSocket(socket, next) {
-        const token = socket.handshake.auth.token;
-        if (!token) {
-            return next(new Error('No token provided'));
-        }
-
-        let decoded;
+    async authenticateSocket(socket, next) {
         try {
-            decoded = jwt.verify(token, process.env.JWT_SECRET || 'your-secret-key');
-        } catch (err) {
-            return next(new Error('Invalid or expired token'));
-        }
+            const token = socket.handshake.auth.token;
+            if (!token) {
+                throw new Error('No token provided');
+            }
 
-        executeQuery('SELECT * FROM users WHERE id = ?', [decoded.id])
-            .then(([users]) => {
-                if (!users || users.length === 0) {
-                    return next(new Error('User not found'));
-                }
-                socket.user = users[0];
-                return next();
-            })
-            .catch((dbErr) => {
-                return next(new Error('Database error'));
-            });
+            const decoded = jwt.verify(token, process.env.JWT_SECRET || 'your-secret-key');
+            const [users] = await executeQuery('SELECT * FROM users WHERE id = ?', [decoded.id]);
+            
+            if (users.length === 0) {
+                throw new Error('User not found');
+            }
+
+            socket.user = users[0]; // FIX: assign single user object
+            next();
+        } catch (error) {
+            next(new Error('Authentication error'));
+        }
     }
 
     // Handle new connection
     async handleConnection(socket) {
-        if (!socket.user) {
-            console.error('Socket user is undefined in handleConnection. Authentication middleware may have failed.');
-            socket.disconnect(true);
-            return;
-        }
-        const userId = socket.user.id; // Now this will work
+        const userId = socket.user.id;
         console.log(`User ${socket.user.name} connected with socket ${socket.id}`);
 
         // Store user connection
@@ -82,12 +72,8 @@ class SocketHandler {
                  WHERE cp.user_id = ? AND cp.is_active = TRUE`,
                 [userId]
             );
-
-            if (!chats || chats.length === 0) return;
-
-            const chatArray = Array.isArray(chats) ? chats : [chats];
-
-            for (const chat of chatArray) {
+            // Always join all rooms
+            for (const chat of chats) {
                 socket.join(`chat_${chat.id}`);
             }
         } catch (error) {
@@ -97,7 +83,7 @@ class SocketHandler {
 
     // Handle socket events
     handleSocketEvents(socket) {
-        const userId = socket.user.id; // FIXED: Now consistent
+        const userId = socket.user.id;
 
         // Send message event
         socket.on('send_message', (data) => this.handleSendMessage(socket, data));
@@ -105,6 +91,9 @@ class SocketHandler {
         // Typing events
         socket.on('typing_start', (data) => this.handleTypingStart(socket, data));
         socket.on('typing_stop', (data) => this.handleTypingStop(socket, data));
+
+    
+
 
         // Message status events
         socket.on('message_delivered', (data) => this.handleMessageStatus(socket, data, 'delivered'));
@@ -115,48 +104,6 @@ class SocketHandler {
 
         // Leave chat room
         socket.on('leave_chat', (data) => this.handleLeaveChat(socket, data));
-
-        // Get online users
-        socket.on('get_online_users', async (data) => {
-            try {
-                const { chatId } = data;
-                
-                // Get all participants in chat
-                const [participants] = await executeQuery(
-                    'SELECT user_id FROM chat_participants WHERE chat_id = ? AND is_active = TRUE',
-                    [chatId]
-                );
-
-                if (!participants || participants.length === 0) {
-                    socket.emit('online_users_list', {
-                        chatId: chatId,
-                        onlineUsers: []
-                    });
-                    return;
-                }
-
-                const participantArray = Array.isArray(participants) ? participants : [participants];
-                
-                // Filter online users
-                const onlineUserIds = participantArray
-                    .filter(p => this.connectedUsers.has(p.user_id))
-                    .map(p => p.user_id);
-
-                socket.emit('online_users_list', {
-                    chatId: chatId,
-                    onlineUsers: onlineUserIds
-                });
-                
-                console.log(`Online users for chat ${chatId}:`, onlineUserIds);
-                
-            } catch (error) {
-                console.error('Get online users error:', error);
-                socket.emit('online_users_list', {
-                    chatId: data.chatId,
-                    onlineUsers: []
-                });
-            }
-        });
     }
 
     // Handle send message
@@ -176,14 +123,14 @@ class SocketHandler {
                 return;
             }
 
-            // Broadcast message to all participants in the chat room EXCEPT sender
-            socket.to(`chat_${chatId}`).emit('new_message', {
+            // Broadcast message to all participants in the chat room (including sender)
+            this.io.to(`chat_${chatId}`).emit('new_message', {
                 ...message,
                 chatId
             });
 
-            // Update message status for online users (excluding sender)
-            await this.updateMessageStatusForOnlineUsers(chatId, message.id, userId);
+            // Update message status for online users
+            await this.updateMessageStatusForOnlineUsers(chatId, message.id);
 
         } catch (error) {
             console.error('Send message error:', error);
@@ -272,14 +219,17 @@ class SocketHandler {
     handleJoinChat(socket, data) {
         const { chatId } = data;
         socket.join(`chat_${chatId}`);
-        console.log(`User ${socket.user.id} joined chat ${chatId}`);
+        // Optionally, emit an event to confirm join
+        // socket.emit('joined_chat', { chatId });
     }
+
+
+    
 
     // Handle leave chat
     handleLeaveChat(socket, data) {
         const { chatId } = data;
         socket.leave(`chat_${chatId}`);
-        console.log(`User ${socket.user.id} left chat ${chatId}`);
     }
 
     // Handle disconnect
@@ -317,55 +267,49 @@ class SocketHandler {
     }
 
     // Broadcast user status to relevant chats
-    async broadcastUserStatus(userId, isOnline) {
-        try {
-            // Get all chats where this user is a participant
-            const [chats] = await executeQuery(
-                `SELECT DISTINCT c.id FROM chats c 
-                 JOIN chat_participants cp ON c.id = cp.chat_id 
-                 WHERE cp.user_id = ? AND cp.is_active = TRUE`,
-                [userId]
-            );
+  // Broadcast user status to relevant chats
+async broadcastUserStatus(userId, isOnline) {
+    try {
+        // Get all chats where this user is a participant
+        const chats = await executeQuery(
+            `SELECT DISTINCT c.id FROM chats c 
+             JOIN chat_participants cp ON c.id = cp.chat_id 
+             WHERE cp.user_id = ? AND cp.is_active = TRUE`,
+            [userId]
+        );
 
-            if (!chats || chats.length === 0) return;
+        const chatArray = Array.isArray(chats) ? chats : [chats];
 
-            const chatArray = Array.isArray(chats) ? chats : [chats];
+        for (const chat of chatArray) {
+            const roomName = `chat_${chat.id}`;
 
-            for (const chat of chatArray) {
-                const roomName = `chat_${chat.id}`;
-                
-                // Broadcast to all users in the room
+            // Sirf un sockets ko emit karo jo room me hain (matlab tab open hai)
+            const room = this.io.sockets.adapter.rooms.get(roomName);
+            if (room && room.size > 1) { // >= 2 ka matlab dono joined
                 this.io.to(roomName).emit(
                     isOnline ? 'user_connected' : 'user_disconnected',
-                    { 
-                        userId: userId, 
-                        isOnline: isOnline,
-                        chatId: chat.id 
-                    }
+                    { userId, isOnline }
                 );
-                
-                console.log(`Broadcasting ${isOnline ? 'connected' : 'disconnected'} for user ${userId} to chat ${chat.id}`);
             }
-        } catch (error) {
-            console.error('Broadcast user status error:', error);
         }
+    } catch (error) {
+        console.error('Broadcast user status error:', error);
     }
+}
+
 
     // Update message status for online users
-    async updateMessageStatusForOnlineUsers(chatId, messageId, senderId = null) {
+    async updateMessageStatusForOnlineUsers(chatId, messageId) {
         try {
+            // Get all participants in the chat
             const [participants] = await executeQuery(
                 'SELECT user_id FROM chat_participants WHERE chat_id = ? AND is_active = TRUE',
                 [chatId]
             );
 
-            if (!participants || participants.length === 0) return;
-
-            const participantArray = Array.isArray(participants) ? participants : [participants];
-
-            // Update status to delivered for online users (excluding sender)
-            for (const participant of participantArray) {
-                if (participant.user_id !== senderId && this.connectedUsers.has(participant.user_id)) {
+            // Update status to delivered for online users
+            for (const participant of participants) {
+                if (this.connectedUsers.has(participant.user_id)) {
                     await executeQuery(
                         `INSERT INTO message_status (message_id, user_id, status) 
                          VALUES (?, ?, 'delivered') 
@@ -412,11 +356,7 @@ class SocketHandler {
                 [chatId]
             );
 
-            if (!participants || participants.length === 0) return [];
-
-            const participantArray = Array.isArray(participants) ? participants : [participants];
-
-            const onlineUsers = participantArray.filter(p => 
+            const onlineUsers = participants.filter(p => 
                 this.connectedUsers.has(p.user_id)
             ).map(p => p.user_id);
 
