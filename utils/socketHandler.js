@@ -109,36 +109,36 @@ socket.join(`chat_${chat.id}`);
     }
 
     // Handle send message
-    async handleSendMessage(socket, data) {
-        try {
-            const { chatId, message } = data;
-            const userId = socket.user.id;
+  async handleSendMessage(socket, data) {
+    try {
+        const { chatId, message } = data;
+        const userId = socket.user.id;
 
-            // Verify user is participant
-            const [participants] = await executeQuery(
-                'SELECT id FROM chat_participants WHERE chat_id = ? AND user_id = ? AND is_active = TRUE',
-                [chatId, userId]
-            );
+        // Verify user is participant
+        const [participants] = await executeQuery(
+            'SELECT id FROM chat_participants WHERE chat_id = ? AND user_id = ? AND is_active = TRUE',
+            [chatId, userId]
+        );
 
-            if (participants.length === 0) {
-                socket.emit('error', { message: 'Access denied' });
-                return;
-            }
-
-            // Broadcast message to all participants in the chat room
-            socket.to(`chat_${chatId}`).emit('new_message', {
-                ...message,
-                chatId
-            });
-
-            // Update message status for online users
-            await this.updateMessageStatusForOnlineUsers(chatId, message.id);
-
-        } catch (error) {
-            console.error('Send message error:', error);
-            socket.emit('error', { message: 'Failed to send message' });
+        if (participants.length === 0) {
+            socket.emit('error', { message: 'Access denied' });
+            return;
         }
+
+        // Broadcast message to all participants in the chat room EXCEPT sender
+        socket.to(`chat_${chatId}`).emit('new_message', {
+            ...message,
+            chatId
+        });
+
+        // Update message status for online users (excluding sender)
+        await this.updateMessageStatusForOnlineUsers(chatId, message.id, userId);
+
+    } catch (error) {
+        console.error('Send message error:', error);
+        socket.emit('error', { message: 'Failed to send message' });
     }
+}
 
     // Handle typing start
     handleTypingStart(socket, data) {
@@ -270,27 +270,25 @@ socket.join(`chat_${chat.id}`);
   // Broadcast user status to relevant chats
 async broadcastUserStatus(userId, isOnline) {
     try {
-        // Get all chats where this user is a participant
-        const chats = await executeQuery(
+        const [chats] = await executeQuery(
             `SELECT DISTINCT c.id FROM chats c 
              JOIN chat_participants cp ON c.id = cp.chat_id 
              WHERE cp.user_id = ? AND cp.is_active = TRUE`,
             [userId]
         );
 
+        if (!chats || chats.length === 0) return;
+
         const chatArray = Array.isArray(chats) ? chats : [chats];
 
         for (const chat of chatArray) {
             const roomName = `chat_${chat.id}`;
-
-            // Sirf un sockets ko emit karo jo room me hain (matlab tab open hai)
-            const room = this.io.sockets.adapter.rooms.get(roomName);
-            if (room && room.size > 1) { // >= 2 ka matlab dono joined
-                this.io.to(roomName).emit(
-                    isOnline ? 'user_connected' : 'user_disconnected',
-                    { userId, isOnline }
-                );
-            }
+            
+            // Broadcast to all users in the room except the user who just connected/disconnected
+            this.io.to(roomName).emit(
+                isOnline ? 'user_connected' : 'user_disconnected',
+                { userId, isOnline }
+            );
         }
     } catch (error) {
         console.error('Broadcast user status error:', error);
@@ -299,29 +297,28 @@ async broadcastUserStatus(userId, isOnline) {
 
 
     // Update message status for online users
-    async updateMessageStatusForOnlineUsers(chatId, messageId) {
-        try {
-            // Get all participants in the chat
-            const [participants] = await executeQuery(
-                'SELECT user_id FROM chat_participants WHERE chat_id = ? AND is_active = TRUE',
-                [chatId]
-            );
+ async updateMessageStatusForOnlineUsers(chatId, messageId, senderId = null) {
+    try {
+        const [participants] = await executeQuery(
+            'SELECT user_id FROM chat_participants WHERE chat_id = ? AND is_active = TRUE',
+            [chatId]
+        );
 
-            // Update status to delivered for online users
-            for (const participant of participants) {
-                if (this.connectedUsers.has(participant.user_id)) {
-                    await executeQuery(
-                        `INSERT INTO message_status (message_id, user_id, status) 
-                         VALUES (?, ?, 'delivered') 
-                         ON DUPLICATE KEY UPDATE status = 'delivered', status_time = NOW()`,
-                        [messageId, participant.user_id]
-                    );
-                }
+        // Update status to delivered for online users (excluding sender)
+        for (const participant of participants) {
+            if (participant.user_id !== senderId && this.connectedUsers.has(participant.user_id)) {
+                await executeQuery(
+                    `INSERT INTO message_status (message_id, user_id, status) 
+                     VALUES (?, ?, 'delivered') 
+                     ON DUPLICATE KEY UPDATE status = 'delivered', status_time = NOW()`,
+                    [messageId, participant.user_id]
+                );
             }
-        } catch (error) {
-            console.error('Update message status error:', error);
         }
+    } catch (error) {
+        console.error('Update message status error:', error);
     }
+}
 
     // Clean up typing status for disconnected user
     cleanupTypingStatus(userId) {
