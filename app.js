@@ -1,6 +1,7 @@
 const express = require('express');
 const cors = require('cors');
 const http = require('http');
+const socketIo = require('socket.io');
 require('dotenv').config();
 
 // Import routes

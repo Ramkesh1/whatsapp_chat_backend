@@ -368,3 +368,10 @@ async broadcastUserStatus(userId, isOnline) {
     }
 }
 
+
+
+
+
+
+module.exports = SocketHandler;
+
