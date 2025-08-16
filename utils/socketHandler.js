@@ -31,7 +31,7 @@ class SocketHandler {
                 throw new Error('User not found');
             }
 
-            socket.user = users;
+            socket.user = users[0];
             next();
         } catch (error) {
             next(new Error('Authentication error'));
@@ -73,6 +73,8 @@ class SocketHandler {
                 [userId]
             );
 
+if (!chats || chats.length === 0) return;
+            
             const chatArray = Array.isArray(chats) ? chats : [chats];
 
 for (const chat of chatArray) {
@@ -104,8 +106,11 @@ socket.join(`chat_${chat.id}`);
         // Join chat room (for new chats)
         socket.on('join_chat', (data) => this.handleJoinChat(socket, data));
 
-        // Leave chat room
+// Leave chat room
         socket.on('leave_chat', (data) => this.handleLeaveChat(socket, data));
+        
+        // Handle open chat event
+        socket.on('open_chat', (data) => this.handleOpenChat(socket, data));
     }
 
     // Handle send message
@@ -217,19 +222,56 @@ socket.join(`chat_${chat.id}`);
         }
     }
 
-    // Handle join chat
+ // Handle join chat
     handleJoinChat(socket, data) {
         const { chatId } = data;
         socket.join(`chat_${chatId}`);
+        
+        socket.to(`chat_${chatId}`).emit('user_joined_chat', {
+            userId: socket.user.id,
+            chatId,
+            userName: socket.user.name,
+            isOnline: true
+        });
     }
 
 
-    
-
-    // Handle leave chat
+ // Handle leave chat
     handleLeaveChat(socket, data) {
         const { chatId } = data;
         socket.leave(`chat_${chatId}`);
+        
+        socket.to(`chat_${chatId}`).emit('user_left_chat', {
+            userId: socket.user.id,
+            chatId,
+            userName: socket.user.name
+        });
+    }
+
+    // Handle open chat
+    async handleOpenChat(socket, data) {
+        try {
+            const { chatId } = data;
+            const userId = socket.user.id;
+            
+            socket.join(`chat_${chatId}`);
+            
+            socket.to(`chat_${chatId}`).emit('user_joined_chat', {
+                userId,
+                chatId,
+                userName: socket.user.name,
+                isOnline: true
+            });
+
+            const onlineUsers = await this.getOnlineUsersInChat(chatId);
+            socket.emit('chat_online_users', {
+                chatId,
+                onlineUsers: onlineUsers.filter(id => id !== userId)
+            });
+            
+        } catch (error) {
+            console.error('Open chat error:', error);
+        }
     }
 
     // Handle disconnect
@@ -267,29 +309,32 @@ socket.join(`chat_${chat.id}`);
     }
 
     // Broadcast user status to relevant chats
-  // Broadcast user status to relevant chats
 async broadcastUserStatus(userId, isOnline) {
     try {
-        // Get all chats where this user is a participant
-        const chats = await executeQuery(
+        const [chats] = await executeQuery(
             `SELECT DISTINCT c.id FROM chats c 
              JOIN chat_participants cp ON c.id = cp.chat_id 
              WHERE cp.user_id = ? AND cp.is_active = TRUE`,
             [userId]
         );
 
-        const chatArray = Array.isArray(chats) ? chats : [chats];
+        if (chats && chats.length > 0) {
+            const chatArray = Array.isArray(chats) ? chats : [chats];
 
-        for (const chat of chatArray) {
-            const roomName = `chat_${chat.id}`;
+            const [userInfo] = await executeQuery(
+                'SELECT name, profile_picture FROM users WHERE id = ?',
+                [userId]
+            );
 
-            // Sirf un sockets ko emit karo jo room me hain (matlab tab open hai)
-            const room = this.io.sockets.adapter.rooms.get(roomName);
-            if (room && room.size > 1) { // >= 2 ka matlab dono joined
-                this.io.to(roomName).emit(
-                    isOnline ? 'user_connected' : 'user_disconnected',
-                    { userId, isOnline }
-                );
+            for (const chat of chatArray) {
+                const roomName = `chat_${chat.id}`;
+                
+                this.io.to(roomName).emit(isOnline ? 'user_connected' : 'user_disconnected', {
+                    userId,
+                    isOnline,
+                    chatId: chat.id,
+                    userName: userInfo[0]?.name || 'Unknown'
+                });
             }
         }
     } catch (error) {
