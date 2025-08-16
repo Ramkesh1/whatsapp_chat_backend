@@ -41,6 +41,11 @@ class SocketHandler {
 
     // Handle new connection
     async handleConnection(socket) {
+        if (!socket.user) {
+            console.error('Socket user is undefined in handleConnection. Authentication middleware may have failed.');
+            socket.disconnect(true);
+            return;
+        }
         const userId = socket.user.id; // Now this will work
         console.log(`User ${socket.user.name} connected with socket ${socket.id}`);
 
